@@ -66,10 +66,15 @@ def play_move(game_id, board):
             else:
                 leftmost_pawn = get_leftmost_pawn(board, start_square=leftmost_pawn + 1)
 
-
-def get_leftmost_pawn(board, start_square=0):
+def get_leftmost_pawn(board, start_square=None, end_square=None):
     bot_color = board.turn
-    for sq in range(start_square, 64):
+    if start_square is None:
+        start_square = 0 if bot_color else 56
+    if end_square is None:
+        end_square = 63 if bot_color else 7
+    increment = 1 if bot_color else -1
+
+    for sq in range(start_square, end_square + increment, increment):
         piece = board.piece_at(sq)
         if piece and piece.piece_type == 1 and piece.color == bot_color:
             return sq

@@ -1,108 +1,135 @@
-import random
+import chess
 import berserk
-from chess import Board, Move, SQUARES
-
-def read_api_key(file_name):
-    with open(file_name, 'r') as f:
-        return f.readline().strip()
-
-api_key_file = 'api_key.txt'
-TOKEN = read_api_key(api_key_file)
-lichess_api = berserk.Client(berserk.TokenSession(TOKEN))
+import random
 
 
-def get_leftmost_pawn(board, start_square=0):
+def read_api_key():
+    with open("api_key.txt") as f:
+        return f.read().strip()
+
+api_key = read_api_key()
+session = berserk.TokenSession(api_key)
+lichess_api = berserk.Client(session)
+
+
+def get_leftmost_pawn(board):
+    print("get_leftmost_pawn called")
     bot_color = board.turn
-    for sq in range(start_square, 64):
-        piece = board.piece_at(sq)
-        if piece and piece.piece_type == 1 and piece.color == bot_color:
-            return sq
+    files = range(8) if bot_color else reversed(range(8))
+    ranks = range(1, 3) if bot_color else reversed(range(6, 8))
+
+    for rank in ranks:
+        for file in files:
+            square = chess.square(file, rank)
+            piece = board.piece_at(square)
+            if piece and piece.piece_type == 1 and piece.color == bot_color:
+                print(f"Leftmost pawn: {square}")
+                return square
     return None
+
 
 def get_leftmost_pawn_moves(board, leftmost_pawn):
     moves = []
-    for move in board.legal_moves:
-        if move.from_square == leftmost_pawn:
-            moves.append(move)
+
+    # En passant left
+    en_passant_left = board.find_move(leftmost_pawn, leftmost_pawn + 7, promotion=None)
+    moves.append(en_passant_left)
+    print(f"En passant left: {en_passant_left}")
+
+    # Capture left
+    capture_left = board.find_move(leftmost_pawn, leftmost_pawn + 9, promotion=None)
+    moves.append(capture_left)
+    print(f"Capture left: {capture_left}")
+
+    # En passant right
+    en_passant_right = board.find_move(leftmost_pawn, leftmost_pawn + 9, promotion=None)
+    moves.append(en_passant_right)
+    print(f"En passant right: {en_passant_right}")
+
+    # Capture right
+    capture_right = board.find_move(leftmost_pawn, leftmost_pawn + 7, promotion=None)
+    moves.append(capture_right)
+    print(f"Capture right: {capture_right}")
+
+    # Advance two squares
+    advance_two = board.find_move(leftmost_pawn, leftmost_pawn + 16, promotion=None)
+    moves.append(advance_two)
+    print(f"Advance two: {advance_two}")
+
+    # Advance one square
+    advance_one = board.find_move(leftmost_pawn, leftmost_pawn + 8, promotion=None)
+    moves.append(advance_one)
+    print(f"Advance one: {advance_one}")
+
     return moves
 
-def get_move_priority(move, board):
-    priorities = {'enpassent_left': 1, 'left': 2, 'enpassent_right': 3, 'right': 4, 'advance_two': 5, 'advance_one': 6}
-    board.push(move)
-    if board.is_en_passant(move):
-        if move.to_square % 8 < move.from_square % 8:
-            priority = 'enpassent_left'
-        else:
-            priority = 'enpassent_right'
-    elif move.to_square % 8 < move.from_square % 8:
-        priority = 'left'
-    elif move.to_square % 8 > move.from_square % 8:
-        priority = 'right'
-    elif move.to_square - move.from_square == 16:
-        priority = 'advance_two'
-    else:
-        priority = 'advance_one'
-    board.pop()
-    return priorities[priority]
+
 
 def choose_move(moves, board):
-    if not moves:
-        return None
-    return min(moves, key=lambda move: get_move_priority(move, board))
-
-def play_random_move(board):
-    legal_moves = list(board.legal_moves)
-    return random.choice(legal_moves) if legal_moves else None
-
-def play_move(game_id, board):
-    if board.turn and not board.is_game_over():
-        leftmost_pawn = get_leftmost_pawn(board)
-        while leftmost_pawn is not None:
-            moves = get_leftmost_pawn_moves(board, leftmost_pawn)
-            move = choose_move(moves, board)
-            if move:
-                lichess_api.board.make_move(game_id, move)
-                break
-            else:
-                leftmost_pawn = get_leftmost_pawn(board, start_square=leftmost_pawn + 1)
-
-def get_leftmost_pawn(board, start_square=None, end_square=None):
-    bot_color = board.turn
-    if start_square is None:
-        start_square = 0 if bot_color else 56
-    if end_square is None:
-        end_square = 63 if bot_color else 7
-    increment = 1 if bot_color else -1
-
-    for sq in range(start_square, end_square + increment, increment):
-        piece = board.piece_at(sq)
-        if piece and piece.piece_type == 1 and piece.color == bot_color:
-            return sq
+    for move in moves:
+        if move and board.is_legal(move):
+            print(f"Legal move: {move}")
+            return move
+        elif move:
+            print(f"Illegal move: {move}")
     return None
 
 
+def play_move(game_id, board):
+    try:
+        update = next(lichess_api.board.stream_game_state(game_id))
+        board.set_fen(update["fen"])
+        board.turn = update["color"] == "white"  # Set the correct turn
+
+        if board.turn != (board.fen().split()[1] == "w"):
+            print("Not our turn. Skipping move.")
+            return
+
+        leftmost_pawn = get_leftmost_pawn(board)
+        moves = get_leftmost_pawn_moves(board, leftmost_pawn)
+        move = choose_move(moves, board)
+        if move:
+            print(f"Playing move: {move}")
+            move_str = move.uci()
+            lichess_api.board.make_move(game_id, move_str)
+            board.push(move)
+        else:
+            print("No legal leftmost pawn moves available.")
+    except Exception as e:
+        print(f"Error in play_move: {e}")
+
+
+
+
+def handle_challenge(event):
+    challenge_id = event['challenge']['id']
+    print(f"Accepting challenge: {challenge_id}")
+    try:
+        lichess_api.challenges.accept(challenge_id)
+    except berserk.exceptions.ResponseError as e:
+        print(f"Failed to accept challenge: {e}")
+
 
 def main():
+    api_key = read_api_key()
+    session = berserk.TokenSession(api_key)
+    lichess_api = berserk.Client(session)
+
     for event in lichess_api.board.stream_incoming_events():
-        if event['type'] == 'challenge':
-            challenge_id = event['challenge']['id']
-            lichess_api.challenges.accept(challenge_id)
-        elif event['type'] == 'gameStart':
-            game_id = event['game']['id']
-            board = Board()
+        print(f"Event: {event}")
+        if event["type"] == "challenge":
+            handle_challenge(event)
+        elif event["type"] == "gameStart":
+            game_id = event
+            print(f"Game started: {game_id}")
+            board = chess.Board()
             while not board.is_game_over():
-                updates = lichess_api.board.stream_game_state(game_id)
-                for update in updates:
-                    if update['type'] == 'gameFull' or update['type'] == 'gameState':
-                        if 'moves' in update:
-                            moves = update['moves'].split(' ')
-                            new_moves = moves[len(board.move_stack):]
-                            for move in new_moves:
-                                board.push_san(move)
-                        if board.turn and not board.is_game_over():
-                            play_move(game_id, board)
+                play_move(game_id, board)
+                board.push(chess.Move.null())
+
+        elif event["type"] == "gameFinish":
+            print(f"Game finished: {event['game']['id']}")
 
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
